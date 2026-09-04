@@ -13,16 +13,11 @@
 
 ## Overview
 
-This platform solves a real problem in investment research: financial documents are dense, long, and time-consuming to read. Analysts need to quickly answer questions like:
+- **Upload any financial PDF and ask questions in plain English** — Drop in an annual report, 10-K, or earnings release and immediately ask *"What were Apple's major risk factors?"* or *"How did revenue change year-over-year?"* The system reads the document so you don't have to.
 
-- *"What were the major risks mentioned by Apple?"*
-- *"How did revenue change compared with the previous year?"*
-- *"What does management say about AI-related investments?"*
-- *"Compare the risk factors discussed by Company A and Company B."*
+- **Every answer is grounded in your documents, with exact page citations** — Responses are backed by retrieved excerpts from the uploaded PDF, each tagged with document name and page number. The LLM is explicitly prohibited from using its training knowledge — if the evidence isn't in the document, it says so.
 
-This system processes uploaded PDFs, generates semantic embeddings, and answers questions using **Retrieval-Augmented Generation (RAG)** — retrieving the relevant document sections and using a locally-running LLM to produce grounded answers with page citations.
-
-**Key principle**: The LLM is never the source of truth. Documents are. Every answer is grounded in retrieved evidence.
+- **Extract and compare structured financial metrics across companies** — Beyond Q&A, the platform pulls key numbers (revenue, net income, EPS, cash flow) from documents into a structured database, then lets you compare two companies side-by-side with charts — both for raw metrics and for qualitative analysis like risk factors and management commentary.
 
 ---
 
