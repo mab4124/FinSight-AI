@@ -1,0 +1,39 @@
+services:
+  # ── PostgreSQL + pgvector ──────────────────────────────────────────────────
+  # Using the official pgvector image which bundles Postgres 16 + the vector extension.
+  # This is the ONLY service that needs Docker — the LLM runs locally via Ollama.
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: fintel_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fintel
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persist database data between container restarts
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fintel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  postgres_data:
+    driver: local
+
+# ── Architecture Note ──────────────────────────────────────────────────────────
+# The backend (FastAPI) and frontend (React) are NOT in Docker here.
+# They run locally for fast development iteration:
+#
+#   Docker:   PostgreSQL + pgvector  (port 5432)
+#   Local:    Ollama with gemma3:4b  (port 11434) ← LLM weights stay on host
+#   Local:    FastAPI backend        (port 8000)
+#   Local:    Vite React frontend    (port 5173)
+#
+# This matches the constraint: "Do NOT put LLM model weights inside Docker images."
+# The backend Dockerfile is provided for optional containerized deployment.

@@ -1,0 +1,22 @@
+[project]
+name = "financial-document-intelligence-backend"
+version = "0.1.0"
+description = "RAG-based financial document intelligence platform backend"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "ANN", "S", "B", "A", "C4", "PT", "RUF"]
+ignore = ["ANN101", "ANN102", "S101", "ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "S"]
+"migrations/**" = ["ANN"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
