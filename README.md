@@ -1,12 +1,12 @@
-# Investment Research & Financial Document Intelligence Platform
+# FinSight AI — Investment Research & Financial Document Intelligence Platform
 
 > A production-style RAG system for analyzing financial documents — upload annual reports and ask natural-language questions answered with grounded citations.
 
-[![Python](https://img.shields.io/badge/Python-3.13-blue?logo=python)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi)](https://fastapi.tiangolo.com)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql)](https://postgresql.org)
+[![Python](https://img.shields.io/badge/Python-3.13-blue)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688)](https://fastapi.tiangolo.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)](https://postgresql.org)
 [![pgvector](https://img.shields.io/badge/pgvector-0.8-green)](https://github.com/pgvector/pgvector)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](https://docker.com)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)](https://docker.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 ---
@@ -25,17 +25,17 @@
 
 | Feature | Status |
 |---|---|
-| PDF upload & validation | ✅ Phase 1 |
-| Page-by-page text extraction (PyMuPDF) | 🔄 Phase 2 |
-| Configurable chunking with overlap | 🔄 Phase 3 |
-| Semantic embeddings via nomic-embed-text | 🔄 Phase 4 |
-| pgvector similarity search | 🔄 Phase 5 |
-| Gemma 3 4B answer generation | 🔄 Phase 6 |
-| Full RAG pipeline with citations | 🔄 Phase 7 |
-| React research dashboard | 🔄 Phase 8 |
-| Structured financial metric extraction | 🔄 Phase 9 |
-| Company comparison with charts | 🔄 Phase 10 |
-| Retrieval quality evaluation | 🔄 Phase 11 |
+| PDF upload and validation | Done — Phase 1 |
+| Page-by-page text extraction (PyMuPDF) | Phase 2 |
+| Configurable chunking with overlap | Phase 3 |
+| Semantic embeddings via nomic-embed-text | Phase 4 |
+| pgvector similarity search | Phase 5 |
+| Gemma 3 4B answer generation | Phase 6 |
+| Full RAG pipeline with citations | Phase 7 |
+| React research dashboard | Phase 8 |
+| Structured financial metric extraction | Phase 9 |
+| Company comparison with charts | Phase 10 |
+| Retrieval quality evaluation | Phase 11 |
 
 ---
 
@@ -190,8 +190,8 @@ financial_metrics
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/financial-document-intelligence.git
-cd financial-document-intelligence
+git clone https://github.com/mab4124/finsight-ai.git
+cd finsight-ai
 ```
 
 ### 2. Configure environment
@@ -203,7 +203,7 @@ cp .env.example .env
 
 ### 3. Start PostgreSQL + pgvector
 
-> ⚠️ **Start Docker Desktop first**, then:
+> Start Docker Desktop before running the command below:
 
 ```bash
 docker compose up -d
@@ -369,19 +369,19 @@ Response:
 
 | Phase | Description | Status |
 |---|---|---|
-| 0 | Environment inspection | ✅ Complete |
-| 1 | Project foundation, FastAPI, DB, Docker | ✅ **Current** |
-| 2 | PDF upload, PyMuPDF extraction | 🔄 Next |
-| 3 | Text cleaning, chunking with overlap | 📋 Planned |
-| 4 | Embeddings + pgvector storage | 📋 Planned |
-| 5 | Vector similarity retrieval | 📋 Planned |
-| 6 | Gemma 3 4B integration | 📋 Planned |
-| 7 | Full RAG pipeline + citations | 📋 Planned |
-| 8 | React frontend dashboard | 📋 Planned |
-| 9 | Structured financial metric extraction | 📋 Planned |
-| 10 | Company comparison + charts | 📋 Planned |
-| 11 | Retrieval evaluation framework | 📋 Planned |
-| 12 | Polish, tests, interview prep | 📋 Planned |
+| 0 | Environment inspection | Complete |
+| 1 | Project foundation, FastAPI, DB, Docker | Complete |
+| 2 | PDF upload, PyMuPDF extraction | Next |
+| 3 | Text cleaning, chunking with overlap | Planned |
+| 4 | Embeddings + pgvector storage | Planned |
+| 5 | Vector similarity retrieval | Planned |
+| 6 | Gemma 3 4B integration | Planned |
+| 7 | Full RAG pipeline + citations | Planned |
+| 8 | React frontend dashboard | Planned |
+| 9 | Structured financial metric extraction | Planned |
+| 10 | Company comparison + charts | Planned |
+| 11 | Retrieval evaluation framework | Planned |
+| 12 | Polish, tests, interview prep | Planned |
 
 ---
 
@@ -411,7 +411,7 @@ Response:
 ## Project Structure
 
 ```
-financial-document-intelligence/
+finsight-ai/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py              # FastAPI application
