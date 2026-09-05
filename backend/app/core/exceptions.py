@@ -35,6 +35,11 @@ class DocumentNotFoundError(FintelError):
     error_code = "DOCUMENT_NOT_FOUND"
 
 
+class PageNotFoundError(FintelError):
+    status_code = status.HTTP_404_NOT_FOUND
+    error_code = "PAGE_NOT_FOUND"
+
+
 class DuplicateDocumentError(FintelError):
     status_code = status.HTTP_409_CONFLICT
     error_code = "DUPLICATE_DOCUMENT"

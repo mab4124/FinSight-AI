@@ -156,4 +156,31 @@ Mitigations in our design:
 
 ---
 
+## Phase 2 Questions Covered
+
+### 7. Why PyMuPDF over PyPDF, pdfplumber, or PDFMiner?
+
+- **Performance**: PyMuPDF is powered by MuPDF (a high-performance C rendering library). It processes large 200+ page 10-Ks up to 10–20x faster than pure-Python parsers like PyPDF or PDFMiner.
+- **Layout & Reading Order**: It handles multi-column financial layouts and text flows with high fidelity compared to simpler extractors.
+- **Memory Footprint**: Page-by-page streaming loads only the active page into memory, keeping the memory footprint minimal even for 100MB+ filings.
+- **Robustness**: Handles corrupted stream objects and non-standard font encodings gracefully.
+
+---
+
+### 8. Why store raw and cleaned pages in `document_pages` instead of going straight to chunks?
+
+1. **Page-Level Provenance**: Financial analysts must verify extracted facts against exact page numbers. Storing pages creates an immutable intermediate representation.
+2. **Decoupled Pipelines**: If we want to experiment with different chunking sizes (e.g., 300 words vs 600 words vs semantic section chunking), we can re-chunk from database rows without re-parsing raw PDF binaries from disk.
+3. **Extraction Quality Auditing**: Makes it straightforward to inspect page text, detect scanned/blank pages (`is_empty=True`), and verify OCR needs.
+
+---
+
+### 9. How does the system handle scanned or image-only PDF pages?
+
+- During page extraction, the text layer is parsed. If `len(cleaned_text) == 0`, the page is marked with `is_empty = True`.
+- In V1, machine-readable text is required. Empty pages are tracked so the system doesn't generate empty embeddings.
+- In Phase 12+, an OCR fallback (e.g., Tesseract or cloud vision API) can specifically target pages where `is_empty == True`.
+
+---
+
 *This file grows with each phase. After Phase 7 (full RAG), all 35 interview questions will have detailed, implementation-specific answers.*

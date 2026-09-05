@@ -26,7 +26,7 @@
 | Feature | Status |
 |---|---|
 | PDF upload and validation | Done — Phase 1 |
-| Page-by-page text extraction (PyMuPDF) | Phase 2 |
+| Page-by-page text extraction (PyMuPDF) | Done — Phase 2 |
 | Configurable chunking with overlap | Phase 3 |
 | Semantic embeddings via nomic-embed-text | Phase 4 |
 | pgvector similarity search | Phase 5 |
@@ -326,8 +326,11 @@ The backend communicates with Ollama through an abstract `LLMClient` interface. 
 | GET | `/api/v1/companies` | List companies |
 | GET | `/api/v1/companies/{id}` | Get company |
 | POST | `/api/v1/documents/upload` | Upload PDF |
+| POST | `/api/v1/documents/{id}/process` | Trigger PDF text extraction |
 | GET | `/api/v1/documents` | List documents |
 | GET | `/api/v1/documents/{id}` | Get document status |
+| GET | `/api/v1/documents/{id}/pages` | Get extracted pages for document |
+| GET | `/api/v1/documents/{id}/pages/{page_number}` | Get specific extracted page |
 | DELETE | `/api/v1/documents/{id}` | Delete document |
 | POST | `/api/v1/query` | RAG question answering (Phase 7) |
 
@@ -371,8 +374,8 @@ Response:
 |---|---|---|
 | 0 | Environment inspection | Complete |
 | 1 | Project foundation, FastAPI, DB, Docker | Complete |
-| 2 | PDF upload, PyMuPDF extraction | Next |
-| 3 | Text cleaning, chunking with overlap | Planned |
+| 2 | PDF upload, PyMuPDF extraction | Complete |
+| 3 | Text cleaning, chunking with overlap | Next |
 | 4 | Embeddings + pgvector storage | Planned |
 | 5 | Vector similarity retrieval | Planned |
 | 6 | Gemma 3 4B integration | Planned |

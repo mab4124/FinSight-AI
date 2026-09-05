@@ -1,10 +1,10 @@
 """
-api/documents.py — Document upload and management endpoints.
+api/documents.py — Document upload, processing, and management endpoints.
 
 Phase 1: Upload, list, get status, delete.
-Phase 2: PDF extraction is triggered via POST /documents/{id}/process.
+Phase 2: PDF extraction triggered via POST /documents/{id}/process, page listing/retrieval.
 
-Security considerations (from the master spec):
+Security considerations:
 - MIME type validation (must be application/pdf or equivalent)
 - File size limit enforced before reading the full file
 - Filename is sanitized; original name is stored but never used as file path
@@ -16,8 +16,8 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
-from fastapi.responses import JSONResponse, Response
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +31,7 @@ from app.core.exceptions import (
 )
 from app.db.models import Company, Document, DocumentType, ProcessingStatus
 from app.db.session import get_db
+from app.services.document_service import DocumentService
 
 logger = logging.getLogger("fintel")
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -58,12 +59,36 @@ class DocumentResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DocumentProcessResponse(BaseModel):
+    id: str
+    status: str
+    page_count: int | None
+    message: str
+
+
+class DocumentPageResponse(BaseModel):
+    id: str
+    document_id: str
+    page_number: int
+    raw_text: str | None
+    cleaned_text: str | None
+    is_empty: bool
+    char_count: int | None
+
+    model_config = {"from_attributes": True}
+
+
+class DocumentPagesListResponse(BaseModel):
+    document_id: str
+    total_pages: int
+    pages: list[DocumentPageResponse]
+
+
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 def _sanitize_filename(name: str) -> str:
     """Remove dangerous characters from a filename."""
     import re
-    # Keep only alphanumeric, dots, dashes, underscores
     safe = re.sub(r"[^\w.\-]", "_", name)
     return safe[:200]  # cap length
 
@@ -92,7 +117,7 @@ async def upload_document(
 
     # 2. Validate MIME type
     content_type = file.content_type or ""
-    if content_type not in _ALLOWED_MIME and not file.filename.lower().endswith(".pdf"):
+    if content_type not in _ALLOWED_MIME and not (file.filename or "").lower().endswith(".pdf"):
         raise InvalidPDFError(
             f"Unsupported file type: {content_type!r}. Only PDF files are accepted."
         )
@@ -154,6 +179,60 @@ async def upload_document(
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
+
+
+@router.post(
+    "/{document_id}/process",
+    response_model=DocumentProcessResponse,
+    summary="Trigger PDF text extraction and page storage for a document",
+)
+async def process_document(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> DocumentProcessResponse:
+    service = DocumentService()
+    doc = await service.process_document(document_id, db)
+    return DocumentProcessResponse(
+        id=doc.id,
+        status=doc.processing_status,
+        page_count=doc.page_count,
+        message=f"Successfully extracted {doc.page_count or 0} pages.",
+    )
+
+
+@router.get(
+    "/{document_id}/pages",
+    response_model=DocumentPagesListResponse,
+    summary="Get extracted pages for a document",
+)
+async def get_document_pages(
+    document_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> DocumentPagesListResponse:
+    service = DocumentService()
+    pages, total = await service.get_pages(document_id, db, limit=limit, offset=offset)
+    return DocumentPagesListResponse(
+        document_id=document_id,
+        total_pages=total,
+        pages=[DocumentPageResponse.model_validate(p) for p in pages],
+    )
+
+
+@router.get(
+    "/{document_id}/pages/{page_number}",
+    response_model=DocumentPageResponse,
+    summary="Get a specific extracted page from a document",
+)
+async def get_document_page(
+    document_id: str,
+    page_number: int,
+    db: AsyncSession = Depends(get_db),
+) -> DocumentPageResponse:
+    service = DocumentService()
+    page = await service.get_page(document_id, page_number, db)
+    return DocumentPageResponse.model_validate(page)
 
 
 @router.get(
