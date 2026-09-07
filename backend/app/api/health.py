@@ -86,3 +86,56 @@ async def health_db(db: AsyncSession = Depends(get_db)) -> JSONResponse:
                 "detail": str(exc),
             },
         )
+
+
+@router.get(
+    "/health/embeddings",
+    summary="Embedding service readiness check",
+    description=(
+        "Verifies that Ollama is reachable and the configured embedding model "
+        "(nomic-embed-text by default) can generate a test vector."
+    ),
+)
+async def health_embeddings(settings: Settings = Depends(get_settings)) -> JSONResponse:
+    """Ping the Ollama embedding endpoint with a short test string.
+
+    Returns 200 with ok=True if the model responds correctly.
+    Returns 503 if Ollama is unreachable or the model is not pulled.
+    """
+    from app.embeddings.local_embeddings import OllamaEmbeddingProvider
+    from app.core.exceptions import EmbeddingUnavailableError, VectorDimensionMismatchError
+
+    provider = OllamaEmbeddingProvider(
+        base_url=settings.EMBEDDING_BASE_URL,
+        model=settings.EMBEDDING_MODEL,
+        expected_dim=settings.EMBEDDING_DIMENSION,
+    )
+    try:
+        ok = await provider.health_check()
+        if ok:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "status": "ok",
+                    "model": settings.EMBEDDING_MODEL,
+                    "dimension": settings.EMBEDDING_DIMENSION,
+                    "base_url": settings.EMBEDDING_BASE_URL,
+                },
+            )
+        else:
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={
+                    "status": "unavailable",
+                    "model": settings.EMBEDDING_MODEL,
+                    "detail": "Ollama did not return a valid embedding. "
+                              "Ensure Ollama is running and the model is pulled: "
+                              f"ollama pull {settings.EMBEDDING_MODEL}",
+                },
+            )
+    except Exception as exc:
+        logger.error("Embedding health check failed: %s", exc)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "error", "detail": str(exc)},
+        )

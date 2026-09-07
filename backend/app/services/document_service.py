@@ -2,6 +2,11 @@
 services/document_service.py — Document ingestion and processing orchestration.
 
 Phase 2: Coordinates extraction of PDF pages and database persistence.
+Phase 3: Extends pipeline with chunking and embedding generation.
+
+Pipeline lifecycle:
+    UPLOADED → EXTRACTING → CHUNKING → EMBEDDING → READY
+                                                  ↘ FAILED (at any stage)
 """
 from __future__ import annotations
 
@@ -11,14 +16,18 @@ from pathlib import Path
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.exceptions import (
     DocumentNotFoundError,
     DocumentProcessingError,
     DocumentStillProcessingError,
+    EmbeddingUnavailableError,
     InvalidPDFError,
     PageNotFoundError,
 )
-from app.db.models import Document, DocumentPage, ProcessingStatus
+from app.db.models import Document, DocumentChunk, DocumentPage, ProcessingStatus
+from app.embeddings.local_embeddings import OllamaEmbeddingProvider
+from app.ingestion.chunker import TextChunker
 from app.ingestion.extractor import ExtractedPage, PDFExtractor
 
 logger = logging.getLogger("fintel.ingestion")
@@ -27,18 +36,44 @@ logger = logging.getLogger("fintel.ingestion")
 class DocumentService:
     """Service layer managing document processing and page queries."""
 
-    def __init__(self, extractor: PDFExtractor | None = None) -> None:
+    def __init__(
+        self,
+        extractor: PDFExtractor | None = None,
+        chunker: TextChunker | None = None,
+        embedder: OllamaEmbeddingProvider | None = None,
+    ) -> None:
+        settings = get_settings()
         self.extractor = extractor or PDFExtractor()
+        self.chunker = chunker or TextChunker(
+            chunk_size=settings.RAG_CHUNK_SIZE,
+            chunk_overlap=settings.RAG_CHUNK_OVERLAP,
+        )
+        self.embedder = embedder or OllamaEmbeddingProvider(
+            base_url=settings.EMBEDDING_BASE_URL,
+            model=settings.EMBEDDING_MODEL,
+            expected_dim=settings.EMBEDDING_DIMENSION,
+        )
+
+    # ── Main pipeline ─────────────────────────────────────────────────────────
 
     async def process_document(
         self,
         document_id: str,
         db: AsyncSession,
     ) -> Document:
-        """Process a document by extracting all pages and saving them.
+        """Run the full ingestion pipeline for a document.
 
-        Lifecycle:
-            UPLOADED -> EXTRACTING -> READY (or FAILED on error)
+        Stages:
+            1. Extract pages from PDF (PyMuPDF).
+            2. Persist DocumentPage rows.
+            3. Chunk cleaned page text.
+            4. Generate embeddings for each chunk via Ollama.
+            5. Persist DocumentChunk rows (content + embedding vector).
+            6. Mark document READY.
+
+        Lifecycle transitions:
+            UPLOADED → EXTRACTING → CHUNKING → EMBEDDING → READY
+                                                          ↘ FAILED
 
         Args:
             document_id: UUID string of the document to process.
@@ -57,29 +92,31 @@ class DocumentService:
                 f"Document {document_id!r} is currently being processed."
             )
 
-        # Transition to EXTRACTING
+        # Reset to EXTRACTING
         doc.processing_status = ProcessingStatus.EXTRACTING.value
         doc.processing_error = None
         await db.commit()
         await db.refresh(doc)
 
-        logger.info("Starting processing for document | id=%s file=%s", doc.id, doc.original_filename)
+        logger.info(
+            "Starting pipeline for document | id=%s file=%s",
+            doc.id,
+            doc.original_filename,
+        )
 
         try:
-            # Check file exists on disk
+            # ── Stage 1: Extract pages ─────────────────────────────────────────
             file_path = Path(doc.file_path)
             if not file_path.exists():
                 raise InvalidPDFError(f"Stored file not found on disk at {file_path}")
 
-            # Extract pages via PyMuPDF
             extracted_pages: list[ExtractedPage] = self.extractor.extract_pages(file_path)
 
-            # Clear any existing pages for idempotency / re-processing
+            # Clear any existing pages for idempotency
             await db.execute(
                 delete(DocumentPage).where(DocumentPage.document_id == document_id)
             )
 
-            # Add new document pages
             page_records = [
                 DocumentPage(
                     document_id=doc.id,
@@ -93,33 +130,107 @@ class DocumentService:
             ]
             db.add_all(page_records)
 
-            # Update document state
             doc.page_count = len(extracted_pages)
+            await db.commit()
+
+            logger.info(
+                "Extraction complete | id=%s pages=%d", doc.id, doc.page_count
+            )
+
+            # ── Stage 2: Chunk ────────────────────────────────────────────────
+            doc.processing_status = ProcessingStatus.CHUNKING.value
+            await db.commit()
+
+            # Build (page_number, cleaned_text) pairs, skip empty pages
+            page_pairs = [
+                (p.page_number, p.cleaned_text)
+                for p in extracted_pages
+                if not p.is_empty and p.cleaned_text
+            ]
+
+            chunks = self.chunker.chunk_pages(document_id=doc.id, pages=page_pairs)
+            logger.info(
+                "Chunking complete | id=%s chunks=%d", doc.id, len(chunks)
+            )
+
+            # ── Stage 3: Embed ────────────────────────────────────────────────
+            doc.processing_status = ProcessingStatus.EMBEDDING.value
+            await db.commit()
+
+            # Clear existing chunks for idempotency
+            await db.execute(
+                delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
+            )
+
+            if chunks:
+                chunk_texts = [c.content for c in chunks]
+                try:
+                    embeddings = await self.embedder.embed_batch(chunk_texts)
+                except EmbeddingUnavailableError as exc:
+                    # Embedding unavailable: persist chunks without vectors so
+                    # the document is not stuck in FAILED and can be re-embedded
+                    # once Ollama is available.
+                    logger.warning(
+                        "Embedding unavailable — saving chunks without vectors | id=%s | %s",
+                        doc.id,
+                        exc,
+                    )
+                    embeddings = [None] * len(chunks)  # type: ignore[list-item]
+
+                chunk_records = [
+                    DocumentChunk(
+                        document_id=doc.id,
+                        page_number=chunk.page_number,
+                        chunk_index=chunk.chunk_index,
+                        content=chunk.content,
+                        embedding=embedding,
+                        token_count=chunk.token_count,
+                    )
+                    for chunk, embedding in zip(chunks, embeddings)
+                ]
+                db.add_all(chunk_records)
+
+                logger.info(
+                    "Embedding complete | id=%s chunks=%d embedded=%d",
+                    doc.id,
+                    len(chunks),
+                    sum(1 for e in embeddings if e is not None),
+                )
+
+            # ── Stage 4: Mark READY ───────────────────────────────────────────
             doc.processing_status = ProcessingStatus.READY.value
             doc.processing_error = None
-
             await db.commit()
             await db.refresh(doc)
 
             logger.info(
-                "Document processing complete | id=%s pages=%d",
+                "Pipeline complete | id=%s status=READY pages=%d chunks=%d",
                 doc.id,
                 doc.page_count,
+                len(chunks),
             )
             return doc
 
         except Exception as exc:
-            logger.exception("Document processing failed | id=%s: %s", doc.id, exc)
+            logger.exception(
+                "Document pipeline failed | id=%s stage=%s: %s",
+                doc.id,
+                doc.processing_status,
+                exc,
+            )
             await db.rollback()
 
-            # Record failure status in DB
             doc.processing_status = ProcessingStatus.FAILED.value
             doc.processing_error = str(exc)
             await db.commit()
 
             if isinstance(exc, (InvalidPDFError, DocumentProcessingError)):
                 raise
-            raise DocumentProcessingError(f"Processing failed for document {document_id}: {exc}") from exc
+            raise DocumentProcessingError(
+                f"Processing failed for document {document_id}: {exc}"
+            ) from exc
+
+    # ── Page queries ───────────────────────────────────────────────────────────
 
     async def get_pages(
         self,
@@ -196,3 +307,44 @@ class DocumentService:
                 f"Page {page_number} not found for document {document_id!r}."
             )
         return page
+
+    # ── Chunk queries ──────────────────────────────────────────────────────────
+
+    async def get_chunks(
+        self,
+        document_id: str,
+        db: AsyncSession,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> tuple[list[DocumentChunk], int]:
+        """Fetch paginated chunks for a document.
+
+        Args:
+            document_id: UUID of document.
+            db: Database async session.
+            limit: Maximum chunks to return.
+            offset: Chunk offset.
+
+        Returns:
+            Tuple of (list of DocumentChunk, total count).
+        """
+        result = await db.execute(select(Document).where(Document.id == document_id))
+        if result.scalar_one_or_none() is None:
+            raise DocumentNotFoundError(f"Document {document_id!r} not found.")
+
+        count_res = await db.execute(
+            select(func.count(DocumentChunk.id)).where(
+                DocumentChunk.document_id == document_id
+            )
+        )
+        total = count_res.scalar_one()
+
+        chunks_res = await db.execute(
+            select(DocumentChunk)
+            .where(DocumentChunk.document_id == document_id)
+            .order_by(DocumentChunk.chunk_index.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+        chunks = list(chunks_res.scalars().all())
+        return chunks, total

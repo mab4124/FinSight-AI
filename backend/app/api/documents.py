@@ -3,6 +3,7 @@ api/documents.py — Document upload, processing, and management endpoints.
 
 Phase 1: Upload, list, get status, delete.
 Phase 2: PDF extraction triggered via POST /documents/{id}/process, page listing/retrieval.
+Phase 3: Full pipeline (extract → chunk → embed) and chunk listing endpoint.
 
 Security considerations:
 - MIME type validation (must be application/pdf or equivalent)
@@ -63,6 +64,7 @@ class DocumentProcessResponse(BaseModel):
     id: str
     status: str
     page_count: int | None
+    chunk_count: int | None
     message: str
 
 
@@ -82,6 +84,24 @@ class DocumentPagesListResponse(BaseModel):
     document_id: str
     total_pages: int
     pages: list[DocumentPageResponse]
+
+
+class DocumentChunkResponse(BaseModel):
+    id: str
+    document_id: str
+    page_number: int
+    chunk_index: int
+    content: str
+    token_count: int | None
+    has_embedding: bool
+
+    model_config = {"from_attributes": True}
+
+
+class DocumentChunksListResponse(BaseModel):
+    document_id: str
+    total_chunks: int
+    chunks: list[DocumentChunkResponse]
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -184,19 +204,45 @@ async def upload_document(
 @router.post(
     "/{document_id}/process",
     response_model=DocumentProcessResponse,
-    summary="Trigger PDF text extraction and page storage for a document",
+    summary="Run the full ingestion pipeline: extract pages, chunk, and generate embeddings",
+    description=(
+        "Runs all three ingestion stages in sequence:\n"
+        "1. **Extract** — parse PDF page-by-page with PyMuPDF.\n"
+        "2. **Chunk** — split cleaned text into overlapping word-window chunks.\n"
+        "3. **Embed** — generate a 768-dim vector per chunk via Ollama nomic-embed-text.\n\n"
+        "If Ollama is unavailable, chunks are saved without embeddings and the "
+        "document is still marked READY so text search remains functional."
+    ),
 )
 async def process_document(
     document_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> DocumentProcessResponse:
+    from sqlalchemy import func as _func
+    from app.db.models import DocumentChunk as _DocumentChunk
+
     service = DocumentService()
     doc = await service.process_document(document_id, db)
+
+    # Count persisted chunks for the response
+    chunk_count_res = await db.execute(
+        _func.count(_DocumentChunk.id).filter(_DocumentChunk.document_id == document_id)
+    )
+    # SQLAlchemy scalar for a plain func.count expression
+    try:
+        chunk_count: int | None = chunk_count_res.scalar_one()
+    except Exception:
+        chunk_count = None
+
     return DocumentProcessResponse(
         id=doc.id,
         status=doc.processing_status,
         page_count=doc.page_count,
-        message=f"Successfully extracted {doc.page_count or 0} pages.",
+        chunk_count=chunk_count,
+        message=(
+            f"Pipeline complete: {doc.page_count or 0} pages extracted, "
+            f"{chunk_count or 0} chunks embedded."
+        ),
     )
 
 
@@ -233,6 +279,40 @@ async def get_document_page(
     service = DocumentService()
     page = await service.get_page(document_id, page_number, db)
     return DocumentPageResponse.model_validate(page)
+
+
+@router.get(
+    "/{document_id}/chunks",
+    response_model=DocumentChunksListResponse,
+    summary="List text chunks for a document",
+    description="Returns the chunks generated from the document's pages. "
+                "Each chunk includes its page number, text content, and whether an "
+                "embedding vector was successfully stored.",
+)
+async def get_document_chunks(
+    document_id: str,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> DocumentChunksListResponse:
+    service = DocumentService()
+    chunks, total = await service.get_chunks(document_id, db, limit=limit, offset=offset)
+    return DocumentChunksListResponse(
+        document_id=document_id,
+        total_chunks=total,
+        chunks=[
+            DocumentChunkResponse(
+                id=c.id,
+                document_id=c.document_id,
+                page_number=c.page_number,
+                chunk_index=c.chunk_index,
+                content=c.content,
+                token_count=c.token_count,
+                has_embedding=c.embedding is not None,
+            )
+            for c in chunks
+        ],
+    )
 
 
 @router.get(
